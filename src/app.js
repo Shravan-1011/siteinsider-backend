@@ -9,16 +9,20 @@ const monitorRoutes = require("./routes/monitorRoutes");
 const app=express();
 
 // Middleware
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "https://siteinsider-frontend-phpdw5rnh-shravanmane81-2713s-projects.vercel.app"
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true
-  })
-);
+app.use(cors({
+  origin: function (origin, callback) {
+    if (
+      !origin || // allow server-to-server / Postman
+      origin.includes("localhost") ||
+      origin.includes("vercel.app")
+    ) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
