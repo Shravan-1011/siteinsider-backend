@@ -13,8 +13,9 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "siteinsider-frontend-phpdw5rnh-shravanmane81-2713s-projects.vercel.app"
+      "https://siteinsider-frontend-phpdw5rnh-shravanmane81-2713s-projects.vercel.app"
     ],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
   })
 );
