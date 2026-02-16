@@ -13,7 +13,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://your-frontend-domain.vercel.app"
+      "siteinsider-frontend-phpdw5rnh-shravanmane81-2713s-projects.vercel.app"
     ],
     credentials: true
   })
