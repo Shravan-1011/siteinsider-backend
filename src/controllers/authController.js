@@ -59,8 +59,9 @@ exports.signup = async(req, res) => {
         res.status(201).json({ token, message: "User created successfully" });
     }catch(error){
         res.status(500).json({ message: "Server error" });
+        console.log("REQ BODY:", req.body);
     }
-
+  
 
     };
 
@@ -78,7 +79,7 @@ exports.signup = async(req, res) => {
                 return res.status(400).json({ message: "Invalid credentials" });
             }
             const token = jwt.sign({ userId : user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
-            res.json({ token });    
+            res.json({ token,publicId: user.publicId });    
         }catch (error) {
   console.error("LOGIN ERROR:", error);
   res.status(500).json({ message: error.message });

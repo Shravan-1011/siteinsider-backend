@@ -8,6 +8,10 @@ const checkLogSchema = new mongoose.Schema(
         ref: "Monitor",
         required: true
     },
+    region: {
+    type: String,
+    required: true,
+  },
 
     status: {
         type: String,
@@ -21,6 +25,9 @@ const checkLogSchema = new mongoose.Schema(
     statusCode: {
         type: Number
     },
+    reason: {
+  type: String
+},
 
     checkedAt: {
         type: Date,

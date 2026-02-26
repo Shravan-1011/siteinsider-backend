@@ -19,6 +19,11 @@ const monitorSchema = new mongoose.Schema(
         type: String,
         required: true
     },
+    regions: {
+  type: [String],
+  enum: ["India", "New York", "Tokyo"],
+  default: ["India"],
+},
     interval: {
         type: Number,
         default: 5
@@ -29,6 +34,17 @@ const monitorSchema = new mongoose.Schema(
         default: true
 
     },
+    method: {
+  type: String,
+  default: "GET",
+},  
+expectedStatus: {
+  type: Number,
+  default: 200
+},
+expectedKeyword: {
+  type: String,
+},
     status: {
         type: String,
         enum: ["UP", "DOWN", "Checking"],

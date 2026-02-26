@@ -1,7 +1,9 @@
 const Monitor = require('../models/Monitor');
 const CheckLog = require('../models/checkLog');
 const Incident = require('../models/Incident');
-
+const PLAN_LIMITS = require('../utils/planLimits');
+const User = require('../models/User');
+const mongoose = require("mongoose");
 
 const dns = require("dns").promises;
 const checkWebsite = require("../services/checkWebsite");
@@ -26,7 +28,7 @@ const isValidUrl = (url) => {
 
 exports.createMonitor = async (req, res) => {
   try {
-    let { name, url } = req.body;
+    let { name, url, method, expectedStatus, expectedKeyword, regions } = req.body;
 
     if (!name || !url) {
       return res.status(400).json({
@@ -54,18 +56,52 @@ exports.createMonitor = async (req, res) => {
         message: "Domain does not exist",
       });
     }
+    //  Fetch user + plan
+    const user = await User.findById(req.userId);
+    const limit = PLAN_LIMITS[user.plan].activeMonitors;
+
+    const activeCount = await Monitor.countDocuments({
+      user: req.userId,
+      status: "UP",
+    });
+
+    if (activeCount >= limit) {
+      return res.status(403).json({
+        message: `Your ${user.plan} plan allows only ${limit} active monitors.`,
+      });
+    }
 
     // 3️⃣ Initial Health Check
-    const result = await checkWebsite(url);
+    const result = await checkWebsite({
+  url,
+  method,
+  expectedStatus,
+  expectedKeyword,
+});
+
+const allowedRegions = ["India", "New York", "Tokyo"];
+
+
+if (!regions || !Array.isArray(regions) || regions.length === 0) {
+      regions = ["India"]; // default fallback
+    }
+
+    regions = regions.filter((r) => allowedRegions.includes(r));
+
 
     // 4️⃣ Save Monitor (ALWAYS)
     const monitor = await Monitor.create({
-      user: req.userId,
-      name,
-      url,
-      status: result.status,
-      lastChecked: new Date(),
-    });
+  user: req.userId,
+  name,
+  url,
+  method: method || "GET",
+  expectedStatus: expectedStatus || 200,
+  expectedKeyword,
+   regions,
+  status: result.status,
+  responseTime: result.responseTime,
+  lastChecked: new Date(),
+});
 
     // 5️⃣ If site is DOWN → create incident immediately
    
@@ -179,7 +215,13 @@ exports.getMonitorAnalytics = async(req,res) => {
       monitor: req.params.id,
     });
 
-        const query = { monitor: req.params.id };
+        const { region } = req.query;
+
+const query = { monitor: req.params.id };
+
+if (region) {
+  query.region = region;
+}
 
         const { range } = req.query;
 
@@ -319,5 +361,190 @@ exports.resumeMonitor = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: "Failed to resume monitor" });
+  }
+};
+
+
+
+
+
+exports.getMonitorDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 50, range = "24h" } = req.query;
+
+    // 1️⃣ Get Monitor
+    const monitor = await Monitor.findOne({
+      _id: id,
+      user: req.userId,
+    });
+
+    if (!monitor) {
+      return res.status(404).json({ message: "Monitor not found" });
+    }
+   const totalChecks = await CheckLog.countDocuments({
+  monitor: id,
+}); 
+    // 2️⃣ Build time range filter
+    const monitorObjectId = new mongoose.Types.ObjectId(id);
+
+const { region } = req.query;
+
+const query = { monitor: monitorObjectId };
+
+if (region) {
+  query.region = region;
+}
+    const now = new Date();
+    let pastDate;
+
+    if (range === "24h") {
+      pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    }
+    if (range === "7d") {
+      pastDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    }
+    if (range === "30d") {
+      pastDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    if (pastDate) {
+      query.checkedAt = { $gte: pastDate };
+    }
+
+    // 3️⃣ Graph logs (paginated)
+    let logsQuery = CheckLog.find(query).sort({ checkedAt: -1 });
+
+    if (limit !== "all") {
+      logsQuery = logsQuery.limit(Number(limit));
+    }
+
+    const logs = await logsQuery;
+    const orderedLogs = logs.reverse();
+
+    const responseTimeGraph = orderedLogs.map((log) => ({
+      time: log.checkedAt,
+      value: log.responseTime || 0,
+    }));
+
+    const statusGraph = orderedLogs.map((log) => ({
+      time: log.checkedAt,
+      value: log.status === "UP" ? 1 : 0,
+    }));
+
+    // 4️⃣ Accurate uptime calculation (no limit)
+    const uptimeStats = await CheckLog.aggregate([
+  { $match: query },
+  {
+    $group: {
+      _id: null,
+      total: { $sum: 1 },
+      up: {
+        $sum: {
+          $cond: [
+            { $eq: [{ $toUpper: "$status" }, "UP"] },
+            1,
+            0,
+          ],
+        },
+      },
+    },
+  },
+]);
+
+    let uptimePercentage = 0;
+
+    if (uptimeStats.length > 0) {
+      const { total, up } = uptimeStats[0];
+      uptimePercentage =
+        total === 0 ? 0 : Number(((up / total) * 100).toFixed(2));
+    }
+   
+
+    // 5️⃣ Incidents
+    const incidents = await Incident.find({
+      monitor: id,
+    }).sort({ startedAt: -1 });
+
+
+    
+    res.json({
+      monitor,
+      analytics: {
+        responseTimeGraph,
+        statusGraph,
+        uptimePercentage,
+        totalChecks
+      },
+      incidents,
+    });
+
+  } catch (error) {
+    console.error("GET MONITOR DETAIL ERROR:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+
+exports.getMonitorsWithRegions = async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.userId);
+
+    // 1️⃣ Get monitors
+    const monitors = await Monitor.find({ user: userId }).lean();
+
+    if (!monitors.length) {
+      return res.json([]);
+    }
+
+    const monitorIds = monitors.map((m) => m._id);
+
+    // 2️⃣ Get latest log per region per monitor
+    const latestLogs = await CheckLog.aggregate([
+      {
+        $match: {
+          monitor: { $in: monitorIds },
+        },
+      },
+      { $sort: { checkedAt: -1 } },
+      {
+        $group: {
+          _id: {
+            monitor: "$monitor",
+            region: "$region",
+          },
+          status: { $first: "$status" },
+          responseTime: { $first: "$responseTime" },
+        },
+      },
+    ]);
+
+    // 3️⃣ Attach region data to monitors
+    const monitorMap = {};
+
+    monitors.forEach((monitor) => {
+      monitor.regionStatuses = [];
+      monitorMap[monitor._id.toString()] = monitor;
+    });
+
+    latestLogs.forEach((log) => {
+      const monitorId = log._id.monitor.toString();
+
+      if (monitorMap[monitorId]) {
+        monitorMap[monitorId].regionStatuses.push({
+          region: log._id.region,
+          status: log.status,
+          responseTime: log.responseTime,
+        });
+      }
+    });
+
+    res.json(Object.values(monitorMap));
+
+  } catch (error) {
+    console.error("GET MONITORS WITH REGIONS ERROR:", error);
+    res.status(500).json({ message: "Server Error" });
   }
 };
