@@ -25,8 +25,9 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // later restrict to frontend domain
-  },
+    origin: process.env.FRONTEND_URL,
+    methods: ["GET", "POST"] // later restrict to frontend domain
+  }
 });
 
 // Make io accessible everywhere
